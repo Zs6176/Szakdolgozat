@@ -32,3 +32,7 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Secret files
+secrets.h
+PMSensor/app/src/main/res/values/secrets.xml

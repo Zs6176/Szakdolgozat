@@ -26,18 +26,6 @@
 #define TFT_CS 34
 #define TFT_RST 37
 
-/*
-#define WIFI_SSID "YOUR_WIFI"
-#define WIFI_PASSWORD "YOUR_PASSWORD"
-
-const char* supabase_base_url = "https://YOUR_PROJECT.supabase.co";
-const char* supabase_auth_url = "https://YOUR_PROJECT.supabase.co/auth/v1/token?grant_type=password";
-const char* supabase_rest_url = "https://YOUR_PROJECT.supabase.co/rest/v1/DataBase";
-const char* supabase_key = "YOUR_anonim_KEY";
-
-const char* user_email = "YOUR_EMAIL";
-const char* user_password = "YOUR_PASSWORD";
-*/
 
 String access_token = "";
 String refresh_token = "";

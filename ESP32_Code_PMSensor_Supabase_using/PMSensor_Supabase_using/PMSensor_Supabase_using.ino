@@ -11,21 +11,21 @@
 #include <ArduinoJson.h>
 #include "secrets.h"
 
-#define UV_SENSOR_PIN 4
-#define HEAT_PAD_PIN 21
+#define UV_SENSOR_PIN 6
+#define HEAT_PAD_PIN 2
 
-#define SDS_PIN_RX 15
-#define SDS_PIN_TX 16
+#define SDS_PIN_RX 18
+#define SDS_PIN_TX 14
 
-#define SDA_PIN 18
-#define SCL_PIN 17
-
+#define SDA_PIN 5
+#define SCL_PIN 4
+/*
 #define TFT_MOSI 35
 #define TFT_CLK 36
 #define TFT_DC 33
 #define TFT_CS 34
 #define TFT_RST 37
-
+*/
 /*
 #define WIFI_SSID "YOUR_WIFI"
 #define WIFI_PASSWORD "YOUR_PASSWORD"
@@ -51,7 +51,7 @@ bool is_SDS_running = true;
 Adafruit_VEML7700 veml;
 Adafruit_AHTX0 aht;
 Adafruit_BMP280 bmp;
-Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_MOSI, TFT_CLK, TFT_RST);
+//Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_MOSI, TFT_CLK, TFT_RST);
 
 //SDS011
 HardwareSerial& serialSDS(Serial2);
@@ -77,10 +77,11 @@ void setup() {
   while (!veml.begin()) Serial.println("VEML7700 nem található!");
   while (!aht.begin()) Serial.println("AHT20 nem található!");
   while (!bmp.begin(0x77)) Serial.println("BMP280 nem található!");
-
+/*
   tft.init(172, 320);
   tft.fillScreen(ST77XX_BLACK);
  // analogSetPinAttenuation(UV_SENSOR_PIN, ADC_0db); // 0 dB -> kb. 0..1.1V
+ */
   pinMode(HEAT_PAD_PIN, OUTPUT);
 
   serialSDS.begin(9600, SERIAL_8N1, SDS_PIN_RX, SDS_PIN_TX);
@@ -144,7 +145,7 @@ void loop() {
     delay(100);
     sds011.perform_work();
   }
-
+/*
   if (sds011_data_ready) {
     WriteToLCD(
       temp,
@@ -155,8 +156,9 @@ void loop() {
       wpm25,
       wpm10);
   }
+  */
 
-  uploadToSupabase(pres, hum, hum_raw, lux, wpm25, temp, temp_raw, uv, wpm10);
+  uploadToSupabase(pres, hum, hum_raw, lux, wpm25, temp, temp_raw, uv, wpm10,analogRead(UV_SENSOR_PIN));
   //Stop the sds sensor working
   constexpr uint32_t down_s = 270;
 
@@ -282,7 +284,7 @@ void checkUART() {
     ESP.restart();
   }
 }
-void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm25, float temp, float temp_raw, int uv, float wpm10) {
+void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm25, float temp, float temp_raw, int uv, float wpm10,int UVValue) {
   HTTPClient http;
 
 
@@ -295,7 +297,8 @@ void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm
   jsonData += "\"Temperature\":" + String(temp) + ",";
   jsonData += "\"Temperature_raw\":" + String(temp_raw) + ",";
   jsonData += "\"UV\":" + String(uv) + ",";
-  jsonData += "\"PM10\":" + String(wpm10);
+  jsonData += "\"PM10\":" + String(wpm10)+ ",";
+  jsonData += "\"UVValue\":" + String(UVValue);
   jsonData += "}";
 
 
@@ -344,8 +347,8 @@ int UVSensor() {
   float sensorVoltage; 
   float sensorValue;
   int uvindex;
-  sensorValue = analogRead(UV_SENSOR_PIN)/5;
-  sensorVoltage = sensorValue/4095*2;
+  sensorValue = analogRead(UV_SENSOR_PIN);
+  sensorVoltage = sensorValue/4095*0.9;
 
   if      (sensorVoltage < 0.05) uvindex=0;
   else if (sensorVoltage > 0.05 && sensorVoltage <= 0.227) uvindex = 1;
@@ -364,7 +367,7 @@ int UVSensor() {
   return (uvindex);
 }
 
-
+/*
 void WriteToLCD(float temp, float hum, float press, int uvindex, float lux, float pm25, float pm10) {
   tft.fillScreen(ST77XX_BLACK);
   tft.setRotation(1);
@@ -394,3 +397,4 @@ void WriteToLCD(float temp, float hum, float press, int uvindex, float lux, floa
   tft.print(pm10);
   tft.print(" ug/m3\n");
 }
+*/

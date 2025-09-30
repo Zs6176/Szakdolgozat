@@ -25,6 +25,7 @@
 #define TFT_DC 33
 #define TFT_CS 34
 #define TFT_RST 37
+<<<<<<< HEAD:ESP32_Code_PMSensor_Supabase_using/PMSensor_Supabase_using/PMSensor_Supabase_using.ino
 */
 /*
 #define WIFI_SSID "YOUR_WIFI"
@@ -38,6 +39,9 @@ const char* supabase_key = "YOUR_anonim_KEY";
 const char* user_email = "YOUR_EMAIL";
 const char* user_password = "YOUR_PASSWORD";
 */
+=======
+
+>>>>>>> 6ab3017d97d1744d4da0c2038313a1af08fa1d2a:ESP32_Code_PMSensor_Supabase_using/PMSensor_Supabase_using.ino
 
 String access_token = "";
 String refresh_token = "";

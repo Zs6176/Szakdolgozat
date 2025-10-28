@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:contentDescription="@string/graphs_scroll_view_description"
+    tools:context=".GraphActivity">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingBottom="48dp">
+
+        <!-- DÁTUMVÁLASZTÓ GOMB -->
+        <Button
+            android:id="@+id/datePickerButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginTop="66dp"
+            android:layout_marginEnd="16dp"
+            android:text="Válassz időszakot"
+            android:backgroundTint="?attr/colorPrimary"
+            android:textColor="?attr/colorOnPrimary"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <!-- Hőmérséklet cím -->
+        <TextView
+            android:id="@+id/tempLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Hőmérséklet (°C)"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:layout_marginTop="16dp"
+            app:layout_constraintTop_toBottomOf="@+id/datePickerButton"
+            app:layout_constraintStart_toStartOf="parent"
+            android:layout_marginStart="16dp"/>
+
+        <!-- Hőmérséklet diagram -->
+        <com.github.mikephil.charting.charts.LineChart
+            android:id="@+id/tempLineChart"
+            android:layout_width="0dp"
+            android:layout_height="400dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:padding="8dp"
+            app:layout_constraintTop_toBottomOf="@+id/tempLabel"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Páratartalom cím -->
+        <TextView
+            android:id="@+id/humidityLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Páratartalom (%)"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:layout_marginTop="16dp"
+            android:layout_marginStart="16dp"
+            app:layout_constraintTop_toBottomOf="@+id/tempLineChart"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <!-- Páratartalom diagram -->
+        <com.github.mikephil.charting.charts.LineChart
+            android:id="@+id/humidityLineChart"
+            android:layout_width="0dp"
+            android:layout_height="400dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:padding="8dp"
+            app:layout_constraintTop_toBottomOf="@+id/humidityLabel"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- PM2.5 cím -->
+        <TextView
+            android:id="@+id/pm25Label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="PM2.5 koncentráció (µg/m³)"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:layout_marginTop="16dp"
+            android:layout_marginStart="16dp"
+            app:layout_constraintTop_toBottomOf="@+id/humidityLineChart"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <!-- PM2.5 diagram -->
+        <com.github.mikephil.charting.charts.LineChart
+            android:id="@+id/pm25LineChart"
+            android:layout_width="0dp"
+            android:layout_height="400dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:padding="8dp"
+            app:layout_constraintTop_toBottomOf="@+id/pm25Label"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- PM10 cím -->
+        <TextView
+            android:id="@+id/pm10Label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="PM10 koncentráció (µg/m³)"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:layout_marginTop="16dp"
+            android:layout_marginStart="16dp"
+            app:layout_constraintTop_toBottomOf="@+id/pm25LineChart"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <!-- PM10 diagram -->
+        <com.github.mikephil.charting.charts.LineChart
+            android:id="@+id/pm10LineChart"
+            android:layout_width="0dp"
+            android:layout_height="400dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:padding="8dp"
+            app:layout_constraintTop_toBottomOf="@+id/pm10Label"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- UV cím -->
+        <TextView
+            android:id="@+id/uvLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="UV sugárzás (index)"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:layout_marginTop="16dp"
+            android:layout_marginStart="16dp"
+            app:layout_constraintTop_toBottomOf="@+id/pm10LineChart"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <!-- UV diagram -->
+        <com.github.mikephil.charting.charts.LineChart
+            android:id="@+id/uvLineChart"
+            android:layout_width="0dp"
+            android:layout_height="400dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:padding="8dp"
+            app:layout_constraintTop_toBottomOf="@+id/uvLabel"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Fényerősség cím -->
+        <TextView
+            android:id="@+id/lightLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Fényerősség (lux)"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:layout_marginTop="16dp"
+            android:layout_marginStart="16dp"
+            app:layout_constraintTop_toBottomOf="@+id/uvLineChart"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <!-- Fényerősség diagram -->
+        <com.github.mikephil.charting.charts.LineChart
+            android:id="@+id/lightLineChart"
+            android:layout_width="0dp"
+            android:layout_height="400dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:padding="8dp"
+            app:layout_constraintTop_toBottomOf="@+id/lightLabel"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Légnyomás cím -->
+        <TextView
+            android:id="@+id/pressureLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Légnyomás (hPa)"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:layout_marginTop="16dp"
+            android:layout_marginStart="16dp"
+            app:layout_constraintTop_toBottomOf="@+id/lightLineChart"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <!-- Légnyomás diagram -->
+        <com.github.mikephil.charting.charts.LineChart
+            android:id="@+id/pressureLineChart"
+            android:layout_width="0dp"
+            android:layout_height="400dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:padding="8dp"
+            app:layout_constraintTop_toBottomOf="@+id/pressureLabel"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</ScrollView>

@@ -1,9 +1,11 @@
 package com.example.pmsensor;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.util.Log;
+import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -14,6 +16,10 @@ import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+// Add these imports at the top
+import android.content.Intent;
+import android.view.View;
+import android.widget.Button;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -35,13 +41,14 @@ public class MainActivity extends AppCompatActivity {
     private TextView uvView;
     private TextView pm25View;
     private TextView pm10View;
+    private Button graphButton; // Declare the button variable
+
 
     // Supabase adatok
 
     private String SUPABASE_URL;
     private String SUPABASE_KEY;
 
-    private static final int LOCATION_PERMISSION_REQUEST_CODE = 101;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -68,24 +75,20 @@ public class MainActivity extends AppCompatActivity {
 
         // 🔹 Supabase-ből lekérés
         loadLastSensorData();
-        /*
-        if (ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            // You have the permission, proceed with fine location access
-        } else {
-            // Request both permissions from the user
-            ActivityCompat.requestPermissions(
-                    this,
-                    new String[]{
-                            Manifest.permission.ACCESS_FINE_LOCATION,
-                            Manifest.permission.ACCESS_COARSE_LOCATION
-                    },
-                    LOCATION_PERMISSION_REQUEST_CODE
-            );
-        }*/
+
+
+        // 1. Find the button by its ID from the layout
+        graphButton = findViewById(R.id.button);
+
+        // 2. Set an OnClickListener on the button
+        graphButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // This method will be called when the button is clicked
+                openGraphActivity();
+            }
+        });
+
     }
 
     private void loadLastSensorData() {
@@ -162,4 +165,13 @@ public class MainActivity extends AppCompatActivity {
             }
         }).start();
     }
+
+    private void openGraphActivity() {
+        // An Intent is an object that provides runtime binding between separate components,
+        // such as two activities. It describes the activity to start.
+        Intent intent = new Intent(this, GraphActivity.class);
+        startActivity(intent);
+    }
+
+
 }

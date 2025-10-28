@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">PMSensor</string>
+    <string name="graphs_scroll_view_description">Görgethető terület a szenzorok grafikonjaival</string>
 </resources>

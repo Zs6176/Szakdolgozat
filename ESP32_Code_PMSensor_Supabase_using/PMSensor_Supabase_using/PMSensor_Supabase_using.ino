@@ -1,9 +1,9 @@
 #include <Wire.h>
-#include <Adafruit_VEML7700.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_AHTX0.h>
 #include <Adafruit_BMP280.h>
 #include <Adafruit_ST7789.h>
+#include "Adafruit_LTR390.h"
 #include <SoftwareSerial.h>
 #include <esp_sds011.h>
 #include <WiFi.h>
@@ -11,7 +11,6 @@
 #include <ArduinoJson.h>
 #include "secrets.h"
 
-#define UV_SENSOR_PIN 6
 #define HEAT_PAD_PIN 2
 
 #define SDS_PIN_RX 18
@@ -19,13 +18,14 @@
 
 #define SDA_PIN 5
 #define SCL_PIN 4
+
+#define HTTTPWAITE 15000
 /*
 #define TFT_MOSI 35
 #define TFT_CLK 36
 #define TFT_DC 33
 #define TFT_CS 34
 #define TFT_RST 37
-<<<<<<< HEAD:ESP32_Code_PMSensor_Supabase_using/PMSensor_Supabase_using/PMSensor_Supabase_using.ino
 */
 /*
 #define WIFI_SSID "YOUR_WIFI"
@@ -39,9 +39,6 @@ const char* supabase_key = "YOUR_anonim_KEY";
 const char* user_email = "YOUR_EMAIL";
 const char* user_password = "YOUR_PASSWORD";
 */
-=======
-
->>>>>>> 6ab3017d97d1744d4da0c2038313a1af08fa1d2a:ESP32_Code_PMSensor_Supabase_using/PMSensor_Supabase_using.ino
 
 String access_token = "";
 String refresh_token = "";
@@ -52,7 +49,7 @@ unsigned long tokenTTL = 0;  // ms-ben
 bool is_SDS_running = true;
 
 // Light Sensors create
-Adafruit_VEML7700 veml;
+Adafruit_LTR390 ltr = Adafruit_LTR390();
 Adafruit_AHTX0 aht;
 Adafruit_BMP280 bmp;
 //Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_MOSI, TFT_CLK, TFT_RST);
@@ -77,16 +74,16 @@ void setup() {
     delay(300);
   }
   Serial.println("\nConnected with IP: " + WiFi.localIP().toString());
+  while (!ltr.begin()) {Serial.println("Couldn't find LTR390 sensor!"); delay(10);}
+  while (!aht.begin()){ Serial.println("AHT20 nem található!");delay(10);}
+  while (!bmp.begin(0x77)){ Serial.println("BMP280 nem található!");delay(10);}
 
-  while (!veml.begin()) Serial.println("VEML7700 nem található!");
-  while (!aht.begin()) Serial.println("AHT20 nem található!");
-  while (!bmp.begin(0x77)) Serial.println("BMP280 nem található!");
+  ltr.setGain(LTR390_GAIN_3);
+  ltr.setResolution(LTR390_RESOLUTION_18BIT);
 /*
   tft.init(172, 320);
   tft.fillScreen(ST77XX_BLACK);
- // analogSetPinAttenuation(UV_SENSOR_PIN, ADC_0db); // 0 dB -> kb. 0..1.1V
  */
-  pinMode(HEAT_PAD_PIN, OUTPUT);
 
   serialSDS.begin(9600, SERIAL_8N1, SDS_PIN_RX, SDS_PIN_TX);
   delay(100);
@@ -96,8 +93,12 @@ void setup() {
 }
 
 void loop() {
-  float temp, hum, temp_raw, hum_raw, pres, lux, wpm25, wpm10;
-  uint8_t uv;
+  float temp, hum, temp_raw, hum_raw, pres, lux, wpm25, wpm10,uv;
+  uint16_t als;
+  uint8_t uv_index;
+  float wfac = 1.0;  // korrekciós faktor, maradhat 1.0
+  int gain = 3;      // amit fent beállítottál
+  
   ensureWiFiConnected();
   if (shouldRefreshToken()) refreshSupabaseToken();
   checkI2C();
@@ -130,6 +131,19 @@ void loop() {
   }
   digitalWrite(HEAT_PAD_PIN, LOW);
 
+// UV mérés
+ltr.setMode(LTR390_MODE_UVS);
+delay(200); // integration time miatt érdemes 200ms
+uv = ltr.readUVS();
+uv_index = ( uv / 2300.0 * wfac ) *4* (18.0 / gain); // float számítás
+
+// ALS mérés
+ltr.setMode(LTR390_MODE_ALS);
+delay(200); // integration time miatt
+als = ltr.readALS();
+//als16 = als20 >> 8; // 20 bit → 16 bit
+lux = (0.6 * als) / (gain * (100.0 / 100.0)) * wfac;
+
   //read the sensor data
   sensors_event_t humidity, temperature;
 
@@ -137,10 +151,9 @@ void loop() {
   temp_raw = temperature.temperature;
   hum_raw = humidity.relative_humidity;
   pres = bmp.readPressure() / 100.0F;
-  uv = UVSensor();
-  lux = veml.readLux();
-  temp = 1.027622 * temp_raw - 0.00028865 * lux - 0.37998 * uv - 0.301226;
-  hum = 1.015463 * hum_raw + 0.000640061 * lux - 0.568064 * uv - 0.708233;
+    
+  temp = 1.027622 * temp_raw - 0.00028865 * lux - 0.37998 * uv_index - 0.301226;
+  hum = 1.015463 * hum_raw + 0.000640061 * lux - 0.568064 * uv_index - 0.708233;
 
   // Wait until get the PM data
   uint32_t timeout = millis() + 30000;  // max 30 secount wait
@@ -162,7 +175,7 @@ void loop() {
   }
   */
 
-  uploadToSupabase(pres, hum, hum_raw, lux, wpm25, temp, temp_raw, uv, wpm10,analogRead(UV_SENSOR_PIN));
+  uploadToSupabase(pres, hum, hum_raw, lux, wpm25, temp, temp_raw, uv_index, wpm10,uv,als);
   //Stop the sds sensor working
   constexpr uint32_t down_s = 270;
 
@@ -215,6 +228,8 @@ bool shouldRefreshToken() {
 void loginToSupabase() {
   HTTPClient http;
   http.begin(supabase_auth_url);
+  http.setTimeout(HTTTPWAITE);  // 15 másodperc
+  http.setReuse(false);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("apikey", supabase_key);
 
@@ -234,7 +249,9 @@ void loginToSupabase() {
       Serial.println("Access token: " + access_token);
     }
   } else {
-    Serial.println("Login error: " + String(httpCode));
+    Serial.print("Login error: ");
+    Serial.println(http.errorToString(httpCode));
+
   }
   http.end();
 }
@@ -248,6 +265,8 @@ void refreshSupabaseToken() {
   HTTPClient http;
   String url = String(supabase_base_url) + "/auth/v1/token?grant_type=refresh_token";
   http.begin(url);
+  http.setTimeout(HTTTPWAITE); // 15 másodperc
+  http.setReuse(false);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("apikey", supabase_key);
 
@@ -266,7 +285,9 @@ void refreshSupabaseToken() {
       Serial.println("Új access token: " + access_token);
     }
   } else {
-    Serial.println("Refresh error: " + String(httpCode));
+    Serial.print("Refresh error: ");
+    Serial.println(http.errorToString(httpCode));
+
   }
   http.end();
 }
@@ -288,7 +309,7 @@ void checkUART() {
     ESP.restart();
   }
 }
-void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm25, float temp, float temp_raw, int uv, float wpm10,int UVValue) {
+void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm25, float temp, float temp_raw, int uv, float wpm10,float uv_raw,float als) {
   HTTPClient http;
 
 
@@ -300,9 +321,13 @@ void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm
   jsonData += "\"PM25\":" + String(wpm25) + ",";
   jsonData += "\"Temperature\":" + String(temp) + ",";
   jsonData += "\"Temperature_raw\":" + String(temp_raw) + ",";
+  jsonData += "\"UV_raw\":" + String(uv_raw) + ",";
+  jsonData += "\"ALS\":" + String(als) + ",";
   jsonData += "\"UV\":" + String(uv) + ",";
-  jsonData += "\"PM10\":" + String(wpm10)+ ",";
-  jsonData += "\"UVValue\":" + String(UVValue);
+  jsonData += "\"Light_quantity\":" + String(lux) + ",";
+
+  jsonData += "\"PM10\":" + String(wpm10);
+  
   jsonData += "}";
 
 
@@ -311,6 +336,8 @@ void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm
 
 
   http.begin(supabase_rest_url);
+  http.setTimeout(HTTTPWAITE);  // 15 másodperc
+  http.setReuse(false);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("apikey", supabase_key);
   http.addHeader("Authorization", "Bearer " + access_token);
@@ -321,11 +348,11 @@ void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm
 
   if (httpResponseCode > 0) {
     Serial.print("HTTP válaszkód: ");
-    Serial.println(httpResponseCode);
+    Serial.println(http.errorToString(httpResponseCode));
     Serial.println(http.getString());
   } else {
     Serial.print("Hiba a POST-ban: ");
-    Serial.println(httpResponseCode);
+    Serial.println(http.errorToString(httpResponseCode));
   }
   http.end();
 }
@@ -345,30 +372,6 @@ void stop_SDS() {
   if (sds011.set_sleep(true)) { is_SDS_running = false; }
 
   Serial.println(F("End sleep SDS011"));
-}
-
-int UVSensor() {
-  float sensorVoltage; 
-  float sensorValue;
-  int uvindex;
-  sensorValue = analogRead(UV_SENSOR_PIN);
-  sensorVoltage = sensorValue/4095*0.9;
-
-  if      (sensorVoltage < 0.05) uvindex=0;
-  else if (sensorVoltage > 0.05 && sensorVoltage <= 0.227) uvindex = 1;
-  else if (sensorVoltage > 0.227 && sensorVoltage <= 0.318) uvindex = 2;
-  else if (sensorVoltage > 0.318 && sensorVoltage <= 0.408) uvindex = 3;
-  else if (sensorVoltage > 0.408 && sensorVoltage <= 0.503) uvindex = 4;
-  else if (sensorVoltage > 0.503 && sensorVoltage <= 0.606) uvindex = 5;
-  else if (sensorVoltage > 0.606 && sensorVoltage <= 0.696) uvindex = 6;
-  else if (sensorVoltage > 0.696 && sensorVoltage <= 0.795) uvindex = 7;
-  else if (sensorVoltage > 0.795 && sensorVoltage <= 0.881) uvindex = 8;
-  else if (sensorVoltage > 0.881 && sensorVoltage <= 0.976) uvindex = 9;
-  else if (sensorVoltage > 0.976 && sensorVoltage <= 1.079) uvindex = 10;
-  else if (sensorVoltage > 1.079 && sensorVoltage <= 1.170) uvindex = 11;
-  else uvindex = 12;  
-  
-  return (uvindex);
 }
 
 /*

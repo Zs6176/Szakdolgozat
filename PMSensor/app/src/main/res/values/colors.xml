@@ -1,5 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
+    <!-- Diagram vonalszínek (Sötét mód) -->
+    <color name="chart_temperature">#FFA726</color> <!-- Világos narancs -->
+    <color name="chart_humidity">#42A5F5</color>    <!-- Világos kék -->
+    <color name="chart_pm25">#BA68C8</color>      <!-- Világos lila -->
+    <color name="chart_pm10">#81C784</color>      <!-- Világos zöld -->
+    <color name="chart_uv">#FFD54F</color>        <!-- Világos borostyán -->
+    <color name="chart_light">#F06292</color>      <!-- Világos pink -->
+    <color name="chart_pressure">#90A4AE</color>   <!-- Világos kékes-szürke -->
+
+    <!-- Diagram szövegszínek -->
+    <color name="chart_text_color">#FFFFFFFF</color>
+    <!-- ... meglévő színek ... -->
+
+    <!-- Diagram tengely és rács színek -->
+    <color name="chart_grid_color">#E0E0E0</color> <!-- Fehér szöveg sötét módban -->
+
+    <!-- ... meglévő színek ... -->
+
+    <!-- Diagram tengely és rács színek -->
+    <!-- <color name="chart_grid_color">#5A5A5A</color> -->
 </resources>

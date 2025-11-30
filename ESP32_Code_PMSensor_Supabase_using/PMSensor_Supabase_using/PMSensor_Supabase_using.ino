@@ -8,9 +8,12 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <LittleFS.h> // Fájlrendszer a mentéshez
-#include "time.h"     // Időkezeléshez
+#include <LittleFS.h>
+#include "time.h"
 #include "secrets.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h> // Mutexhez
 
 #define HEAT_PAD_PIN 2
 #define SDS_PIN_RX 18
@@ -25,9 +28,12 @@ String refresh_token = "";
 unsigned long tokenTimestamp = 0;
 unsigned long tokenTTL = 0;
 
-// Utolsó érvényes időbélyeg (Epoch formátumban)
+// Időkezelés
 time_t last_valid_time = 0; 
-bool time_synced = false; // Jelzi, ha már legalább egyszer kaptunk időt a szervertől vagy NTP-től
+bool time_synced = false; 
+
+// Mutex a fájlrendszer védelmére
+SemaphoreHandle_t fileMutex;
 
 // Szenzor objektumok
 bool is_SDS_running = true;
@@ -43,24 +49,26 @@ int pm25_table[pm_tablesize];
 int pm10_table[pm_tablesize];
 volatile bool sds011_data_ready = false;
 
-// NTP beállítások (csak kezdő inicializáláshoz, utána a DB időt használjuk)
+// NTP beállítások (CEST: GMT+1, +1 óra nyári időszámítás)
 const char* ntpServer = "pool.ntp.org";
+const long  gmtOffset_sec = 3600;     // UTC + 1 óra
+const int   daylightOffset_sec = 3600; // +1 óra nyári időszámítás
+
+// --- Elődeklarációk ---
+void uploadOfflineDataTask(void * parameter);
+bool updateTimeFromNTP();
+void saveOfflineDataSafe(String jsonData);
 
 // --- Segédfüggvények az időhöz ---
-
-// ISO String konvertálása time_t típusra (A Supabase válaszának feldolgozásához)
 time_t parseIsoTime(String isoTime) {
   struct tm tm = {0};
-  // Supabase formátum pl: 2023-11-13T18:30:00.123456+00:00
-  // Mi csak az első részt dolgozzuk fel: YYYY-MM-DDTHH:MM:SS
   strptime(isoTime.c_str(), "%Y-%m-%dT%H:%M:%S", &tm);
-  return mktime(&tm); // Átalakítás epoch másodpercekké
+  return mktime(&tm);
 }
 
-// time_t konvertálása ISO Stringre (Az offline mentéshez)
 String formatIsoTime(time_t timestamp) {
   struct tm *timeinfo;
-  timeinfo = localtime(&timestamp); // Vagy gmtime, ha UTC-t használsz a DB-ben
+  timeinfo = localtime(&timestamp);
   char buffer[30];
   strftime(buffer, 30, "%Y-%m-%dT%H:%M:%S", timeinfo);
   return String(buffer);
@@ -70,7 +78,9 @@ String formatIsoTime(time_t timestamp) {
 void setup() {
   Serial.begin(115200);
 
-  // LittleFS inicializálás
+  // Mutex létrehozása
+  fileMutex = xSemaphoreCreateMutex();
+
   if (!LittleFS.begin(true)) {
     Serial.println("LittleFS Mount Failed");
     return;
@@ -86,15 +96,13 @@ void setup() {
   }
   Serial.println("\nConnected with IP: " + WiFi.localIP().toString());
 
-  // Kezdeti idő szinkronizálás NTP-ről (biztonsági tartalék, amíg nincs DB válasz)
-  configTime(0, 0, ntpServer); // UTC idő
-  struct tm timeinfo;
-  if (getLocalTime(&timeinfo)) {
-    time(&last_valid_time);
-    time_synced = true;
-    Serial.println("Kezdeti idő NTP-ről beállítva.");
+  // Kezdeti idő szinkronizálás NTP-ről
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  if (updateTimeFromNTP()) {
+      Serial.println("Kezdeti idő NTP-ről beállítva (CEST).");
   }
-
+setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1); 
+tzset();
   while (!ltr.begin()) { Serial.println("Couldn't find LTR390 sensor!"); delay(10); }
   while (!aht.begin()) { Serial.println("AHT20 nem található!"); delay(10); }
   while (!bmp.begin(0x77)) { Serial.println("BMP280 nem található!"); delay(10); }
@@ -105,6 +113,18 @@ void setup() {
   delay(100);
 
   loginToSupabase();
+
+  // --- HÁTTÉRSZÁL INDÍTÁSA ---
+  // Core 0-n futtatjuk (a loop a Core 1-en fut alapból), 16KB stack mérettel
+  xTaskCreatePinnedToCore(
+    uploadOfflineDataTask, /* Függvény neve */
+    "OfflineUpload",       /* Task neve */
+    16384,                  /* Stack méret (bájt) */
+    NULL,                  /* Paraméterek */
+    1,                     /* Prioritás (alacsony) */
+    NULL,                  /* Handle */
+    0                      /* Core ID (0 vagy 1) */
+  );
 }
 
 void loop() {
@@ -116,7 +136,7 @@ void loop() {
 
   ensureWiFiConnected();
   if (shouldRefreshToken()) refreshSupabaseToken();
-  checkI2C();
+  checkAndRecoverI2C();
   checkUART();
   start_SDS();
 
@@ -141,7 +161,7 @@ void loop() {
   deadline = millis() + duty_s * 1000;
   while (static_cast<int32_t>(deadline - millis()) > 0) {
     delay(1000);
-    Serial.println(static_cast<int32_t>(deadline - millis()) / 1000);
+    // Serial.println(static_cast<int32_t>(deadline - millis()) / 1000); // Opcionális log
     sds011.perform_work();
   }
   digitalWrite(HEAT_PAD_PIN, LOW);
@@ -201,6 +221,7 @@ void loop() {
         digitalWrite(HEAT_PAD_PIN, HIGH);
       }
     }
+
   }
   sds011.perform_work();
 }
@@ -215,23 +236,20 @@ void ensureWiFiConnected() {
       delay(500);
       Serial.print(".");
     }
-    Serial.println(WiFi.status() == WL_CONNECTED ? "\nWiFi újracsatlakozva!" : "\nWiFi hiba!");
   }
 }
+
 void checkUART() {
   if (!serialSDS.available()) {
     Serial.println("UART adat nincs — újrainicializálás...");
-
-    // UART port újraindítása
     serialSDS.end();
     delay(100);
     serialSDS.begin(9600, SERIAL_8N1, SDS_PIN_RX, SDS_PIN_TX);
     delay(200);
-    
     Serial.println("UART újrainicializálva");
   }
-
 }
+
 // --- Token ---
 bool shouldRefreshToken() {
   unsigned long elapsed = millis() - tokenTimestamp;
@@ -252,14 +270,13 @@ void loginToSupabase() {
 
   if (httpCode > 0) {
     String payload = http.getString();
-    Serial.println("Login response: " + payload);
     DynamicJsonDocument doc(2048);
     if (deserializeJson(doc, payload) == DeserializationError::Ok) {
       access_token = doc["access_token"].as<String>();
       refresh_token = doc["refresh_token"].as<String>();
       tokenTTL = doc["expires_in"].as<int>() * 1000;
       tokenTimestamp = millis();
-      Serial.println("Access token: " + access_token);
+      Serial.println("Login OK");
     }
   } else {
     Serial.print("Login error: "); Serial.println(http.errorToString(httpCode));
@@ -282,14 +299,13 @@ void refreshSupabaseToken() {
 
   if (httpCode > 0) {
     String payload = http.getString();
-    Serial.println("Refresh response: " + payload);
     DynamicJsonDocument doc(2048);
     if (deserializeJson(doc, payload) == DeserializationError::Ok) {
       access_token = doc["access_token"].as<String>();
       refresh_token = doc["refresh_token"].as<String>();
       tokenTTL = doc["expires_in"].as<int>() * 1000;
       tokenTimestamp = millis();
-      Serial.println("Új access token: " + access_token);
+      Serial.println("Token refreshed");
     }
   } else {
     Serial.print("Refresh error: "); Serial.println(http.errorToString(httpCode));
@@ -297,33 +313,182 @@ void refreshSupabaseToken() {
   http.end();
 }
 
-void checkI2C() {
-  Wire.beginTransmission(0x77);
-  if (Wire.endTransmission() != 0) {
-    Serial.println("I2C hiba, újraindítás...");
-    ESP.restart();
+bool checkAndRecoverI2C() {
+  byte addressesToScan[] = {
+    0x77, // BMP280
+    0x38, // AHTX0
+    0x53  // LTR390
+  };
+  bool recovery_needed = false;
+
+  // 1. Ellenőrzés
+  for (byte address : addressesToScan) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission() != 0) {
+      Serial.print("!!! I2C HIBA ÉSZLELVE: Eszköz nem válaszol: 0x");
+      Serial.println(address, HEX);
+      recovery_needed = true;
+      break; // Elég egy hiba, a busz valószínűleg "beragadt"
+    }
+  }
+
+  // 2. Helyreállítás (ha szükséges)
+  if (recovery_needed) {
+    Serial.println("I2C busz helyreállítási kísérlet (restart nélkül)...");
+
+    // A: I2C periféria újraindítása az ESP32-n
+    Wire.end();
+    delay(100); // Rövid szünet
+    Wire.begin(SDA_PIN, SCL_PIN);
+    delay(100);
+
+    // B: Minden I2C szenzor könyvtárának újraindítása
+    // (mintha a setup() futna le újra)
+    Serial.println("Szenzorok szoftveres újraindítása...");
+    
+    if (!aht.begin()) { 
+      Serial.println("AHT20 újraindítása sikertelen!"); 
+    }
+    if (!bmp.begin(0x77)) { 
+      Serial.println("BMP280 újraindítása sikertelen!"); 
+    }
+    if (!ltr.begin()) { 
+      Serial.println("LTR390 újraindítása sikertelen!"); 
+    } else {
+      // Fontos: az LTR390 egyedi beállításait újra alkalmazni kell!
+      ltr.setResolution(LTR390_RESOLUTION_18BIT); 
+    }
+
+    Serial.println("I2C helyreállítás befejezve. Ez a mérési ciklus kimarad.");
+    return false; // Jelezzük a loop()-nak, hogy hiba volt
+  }
+
+  return true; // Minden rendben
+}
+// --- Időlekérés NTP-ről (fallback) ---
+bool updateTimeFromNTP() {
+    struct tm timeinfo;
+    // 2000 ms timeout az NTP lekérésre
+    if(!getLocalTime(&timeinfo, 2000)){ 
+        Serial.println("Nem sikerült az NTP időlekérés.");
+        return false;
+    }
+    time(&last_valid_time);
+    time_synced = true;
+    Serial.println("Idő frissítve NTP-ről: " + formatIsoTime(last_valid_time));
+    return true;
+}
+
+// --- Biztonságos mentés Mutex-szel ---
+void saveOfflineDataSafe(String jsonData) {
+  // Megpróbáljuk megszerezni a zárat végtelen várakozással (portMAX_DELAY)
+  if (xSemaphoreTake(fileMutex, portMAX_DELAY) == pdTRUE) {
+    File file = LittleFS.open("/offline_data.json", "a");
+    if (file) {
+      file.println(jsonData);
+      file.close();
+      Serial.println("Adat offline mentve.");
+    } else {
+      Serial.println("Nem sikerült megnyitni a fájlt írásra");
+    }
+    // Zár feloldása
+    xSemaphoreGive(fileMutex);
   }
 }
 
-// --- Offline Mentés Függvény ---
-void saveOfflineData(String jsonData) {
-  File file = LittleFS.open("/offline_data.json", "a"); // Hozzáfűzés mód
-  if (!file) {
-    Serial.println("Nem sikerült megnyitni a fájlt írásra");
-    return;
+// --- HÁTTÉRSZÁL (Task) ---
+void uploadOfflineDataTask(void * parameter) {
+  for (;;) {
+    if (WiFi.status() == WL_CONNECTED && access_token != "") {
+      
+      bool hasDataToProcess = false;
+
+      // 1. LÉPÉS: Megnézzük van-e adat, és ha igen, átnevezzük a fájlt, 
+      // hogy a fő szál nyugodtan írhasson az új fájlba.
+      if (xSemaphoreTake(fileMutex, portMAX_DELAY) == pdTRUE) {
+        if (LittleFS.exists("/offline_data.json")) {
+          // Ha már létezik processing fájl, akkor az előző körben hiba volt,
+          // azt folytatjuk, nem nevezzük át az újat még.
+          if (!LittleFS.exists("/processing.json")) {
+             LittleFS.rename("/offline_data.json", "/processing.json");
+          }
+          hasDataToProcess = true;
+        } else if (LittleFS.exists("/processing.json")) {
+          hasDataToProcess = true;
+        }
+        xSemaphoreGive(fileMutex);
+      }
+
+      // 2. LÉPÉS: Feldolgozás (ha van processing fájl)
+      if (hasDataToProcess) {
+        File file = LittleFS.open("/processing.json", "r");
+        if (file) {
+          String tempFileName = "/processing_temp.json";
+          File tempFile = LittleFS.open(tempFileName, "w"); // Ide írjuk, ami MÉG nem ment el
+          
+          bool allSuccess = true;
+
+          while(file.available()) {
+            String line = file.readStringUntil('\n');
+            line.trim();
+            if (line.length() == 0) continue;
+
+            // Feltöltés logika (Ugyanaz a HTTP kérés, de lokális változókkal)
+            HTTPClient http;
+            http.begin(supabase_rest_url);
+            http.setTimeout(10000); // Kisebb timeout a háttérszálnak
+            http.setReuse(false);
+            http.addHeader("Content-Type", "application/json");
+            http.addHeader("apikey", supabase_key);
+            http.addHeader("Authorization", "Bearer " + access_token);
+            http.addHeader("Prefer", "return=representation");
+            
+            int httpResponseCode = http.POST(line);
+            http.end();
+
+            if (httpResponseCode == 201) {
+               Serial.println("[Task] Sikeres offline feltöltés.");
+            } else {
+               Serial.print("[Task] Feltöltés hiba: ");
+               Serial.println(httpResponseCode);
+               // Ha nem sikerült, elmentjük a temp fájlba, hogy megmaradjon
+               if(tempFile) tempFile.println(line);
+               allSuccess = false;
+               // Opcionális: Ha hálózati hiba van, megszakíthatjuk a ciklust
+               if (httpResponseCode <= 0) break; 
+            }
+            // Kis szünet a processzor kímélése érdekében
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+          }
+          
+          file.close();
+          if(tempFile) tempFile.close();
+
+          // 3. LÉPÉS: Takarítás
+          if (allSuccess) {
+            LittleFS.remove("/processing.json");
+            LittleFS.remove(tempFileName); // Üres volt
+          } else {
+            // Ha maradt adat, a temp fájl lesz az új processing fájl
+            LittleFS.remove("/processing.json");
+            LittleFS.rename(tempFileName, "/processing.json");
+          }
+        }
+      }
+    }
+    
+    // Várakozás a következő ellenőrzésig (pl. 10 másodperc)
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
   }
-  file.println(jsonData);
-  file.close();
-  Serial.println("Adat mentve az offline tárolóba.");
 }
 
-// --- Feltöltés ---
+// --- ADATKÜLDÉS ÉS MENTÉS ---
 void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm25, float temp, float temp_raw, int uv, float wpm10, float uv_raw, float als) {
   HTTPClient http;
   
-  // JSON létrehozása ArduinoJson-nal a biztonságos kezelésért
   DynamicJsonDocument doc(1024);
   
+  // JSON adatok kitöltése...
   doc["Atmospheric_pressure"] = pres;
   doc["Humidity"] = hum;
   doc["Humidity_raw"] = hum_raw;
@@ -336,8 +501,6 @@ void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm
   doc["UV"] = uv;
   doc["PM10"] = wpm10;
   
-  // Megjegyzés: Normál esetben NEM küldünk Measure_time-ot, a DB generálja.
-
   String jsonData;
   serializeJson(doc, jsonData);
 
@@ -350,24 +513,19 @@ void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm
   http.addHeader("Content-Type", "application/json");
   http.addHeader("apikey", supabase_key);
   http.addHeader("Authorization", "Bearer " + access_token);
-  
-  // FONTOS: Ez kéri a Supabase-t, hogy küldje vissza a beszúrt adatot (benne az idővel)
   http.addHeader("Prefer", "return=representation"); 
 
   int httpResponseCode = http.POST(jsonData);
 
-  // --- SIKERES KÜLDÉS (200 vagy 201) ---
-  if (httpResponseCode >= 200 && httpResponseCode < 300) {
+  // --- SIKERES KÜLDÉS ---
+  if (httpResponseCode == 201) {
     String response = http.getString();
-    Serial.print("Sikeres feltöltés. Válasz: ");
-    Serial.println(response);
+    Serial.println("Sikeres feltöltés.");
 
-    // A válaszból kinyerjük a DB által generált Measure_time-ot
     DynamicJsonDocument responseDoc(2048);
     DeserializationError error = deserializeJson(responseDoc, response);
     
     if (!error) {
-      // Supabase tömböt ad vissza, ha return=representation van, [0] az első elem
       String serverTimeStr;
       if (responseDoc.is<JsonArray>()) {
          serverTimeStr = responseDoc[0]["Measure_time"].as<String>();
@@ -378,36 +536,50 @@ void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm
       if (serverTimeStr != "null" && serverTimeStr != "") {
         last_valid_time = parseIsoTime(serverTimeStr);
         time_synced = true;
-        Serial.print("Szerver idő szinkronizálva: ");
+        Serial.print("Idő szinkronizálva a szerverről: ");
         Serial.println(serverTimeStr);
       }
     }
   } 
-  else{
+  // --- SIKERTELEN KÜLDÉS ---
+  else {
     Serial.print("Hiba a POST-ban: ");
     Serial.println(http.errorToString(httpResponseCode));
 
-    // Csak akkor mentünk, ha már van legalább egy érvényes időnk
-    if (time_synced) {
+    bool is_fresh_ntp = false; // Segédváltozó: most kaptunk-e friss időt?
+
+    // Ha nincs még időnk, megpróbáljuk NTP-ről
+    if (!time_synced) {
+      Serial.println("Nincs szinkronizált idő. Próbálkozás NTP-vel...");
+      if (updateTimeFromNTP()) {
+          is_fresh_ntp = true; // Sikerült, ez egy FRISS, AKTUÁLIS idő
+      }
+    }
+
+ú    if (time_synced && last_valid_time > 0) {
       Serial.println("Hálózati hiba. Offline mentés folyamatban...");
       
-      // 1. Hozzáadunk 5 percet (300 másodperc) az utolsó ismert időhöz
-      last_valid_time += 300;
+      if (!is_fresh_ntp) {
+          last_valid_time += 300;
+          Serial.println("Régi idő láncolása (+5 perc).");
+      } else {
+          Serial.println("Friss NTP idő használata (nincs növelés).");
+      }
 
-      // 2. Beillesztjük az új időt a JSON-ba
+      // Beírjuk az időt a JSON-ba
       doc["Measure_time"] = formatIsoTime(last_valid_time);
       
-      // 3. Újrageneráljuk a stringet
       String offlineJson;
       serializeJson(doc, offlineJson);
 
-      // 4. Mentés fájlba
-      saveOfflineData(offlineJson);
+      // Mentés fájlba
+      saveOfflineDataSafe(offlineJson);
       
-      Serial.print("Offline adat mentve ezzel az idővel: ");
+      Serial.print("Offline adat elmentve ezzel az időbélyeggel: ");
       Serial.println(formatIsoTime(last_valid_time));
+      
     } else {
-      Serial.println("Nincs érvényes időszinkron, nem tudok offline menteni.");
+      Serial.println("KRITIKUS: Nincs érvényes időszinkron (NTP is fail). Adat eldobva.");
     }
   }
   http.end();

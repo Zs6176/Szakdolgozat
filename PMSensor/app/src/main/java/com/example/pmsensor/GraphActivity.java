@@ -40,11 +40,11 @@ public class GraphActivity extends AppCompatActivity {
     private String SUPABASE_URL;
     private String SUPABASE_KEY;
 
-    // UI Elemek referenciái
+
     private Button datePickerButton;
     private LineChart tempLineChart, humidityLineChart, pm25LineChart, pm10LineChart, uvLineChart, lightLineChart, pressureLineChart;
 
-    // Aktuálisan kiválasztott időszak tárolása
+
     private Long startDate = null;
     private Long endDate = null;
 
@@ -61,7 +61,7 @@ public class GraphActivity extends AppCompatActivity {
         SUPABASE_URL = getString(R.string.supabase_url);
         SUPABASE_KEY = getString(R.string.supabase_key);
 
-        // 1. UI elemek inicializálása
+
         tempLineChart = findViewById(R.id.tempLineChart);
         humidityLineChart = findViewById(R.id.humidityLineChart);
         pm25LineChart = findViewById(R.id.pm25LineChart);
@@ -71,10 +71,10 @@ public class GraphActivity extends AppCompatActivity {
         pressureLineChart = findViewById(R.id.pressureLineChart);
         datePickerButton = findViewById(R.id.datePickerButton);
 
-        // 2. Dátumválasztó gomb eseménykezelőjének beállítása
+
         setupDatePicker();
 
-        // 3. Kezdeti adatlekérés (az utolsó 24 óra)
+
         Calendar cal = Calendar.getInstance();
         endDate = cal.getTimeInMillis(); // Ma
         cal.add(Calendar.DAY_OF_YEAR, -1); // 24 órával ezelőtt
@@ -128,7 +128,7 @@ public class GraphActivity extends AppCompatActivity {
     private void fetchAndDisplaySensorData() {
         new Thread(() -> {
             try {
-                SimpleDateFormat supabaseFormatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+                SimpleDateFormat supabaseFormatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.GERMANY);
                 supabaseFormatter.setTimeZone(TimeZone.getTimeZone("UTC"));
 
                 String startTimeString = supabaseFormatter.format(new Date(startDate));
@@ -136,12 +136,13 @@ public class GraphActivity extends AppCompatActivity {
 
                 OkHttpClient client = new OkHttpClient();
                 ArrayList<PMSensor> sensorDataList = new ArrayList<>();
-
+                JSONArray jsonArray = new JSONArray();
+                do{
                 String url = SUPABASE_URL + "/rest/v1/PMSensor?select=*"
                         + "&Measure_time=gte." + startTimeString
                         + "&Measure_time=lte." + endTimeString
                         + "&order=Measure_time.asc"
-                        + "&limit=1500";
+                        + "&limit=1000";
 
                 Request request = new Request.Builder()
                         .url(url)
@@ -152,11 +153,10 @@ public class GraphActivity extends AppCompatActivity {
 
                 Log.d("Supabase", "Request URL: " + url);
 
-                Response response = client.newCall(request).execute();
-
+                    Response response = client.newCall(request).execute();
                 if (response.isSuccessful() && response.body() != null) {
                     String responseBody = response.body().string();
-                    JSONArray jsonArray = new JSONArray(responseBody);
+                     jsonArray = new JSONArray(responseBody);
 
                     for (int i = 0; i < jsonArray.length(); i++) {
                         JSONObject obj = jsonArray.getJSONObject(i);
@@ -175,27 +175,42 @@ public class GraphActivity extends AppCompatActivity {
                         ));
                     }
 
-                    runOnUiThread(() -> {
-                        if (!sensorDataList.isEmpty()) {
-                            Toast.makeText(GraphActivity.this, sensorDataList.size() + " adatpont betöltve.", Toast.LENGTH_SHORT).show();
+                    if (!sensorDataList.isEmpty()) {
 
-                            // JAVÍTVA: A színeket a color erőforrásokból olvassuk ki
-                            setupChart(tempLineChart, sensorDataList, "Hőmérséklet", ContextCompat.getColor(this, R.color.chart_temperature), sensor -> sensor.temperature);
-                            setupChart(humidityLineChart, sensorDataList, "Páratartalom", ContextCompat.getColor(this, R.color.chart_humidity), sensor -> sensor.humidity);
-                            setupChart(pm25LineChart, sensorDataList, "PM2.5", ContextCompat.getColor(this, R.color.chart_pm25), sensor -> sensor.PM2_5);
-                            setupChart(pm10LineChart, sensorDataList, "PM10", ContextCompat.getColor(this, R.color.chart_pm10), sensor -> sensor.PM10);
-                            setupChart(uvLineChart, sensorDataList, "UV Index", ContextCompat.getColor(this, R.color.chart_uv), sensor -> sensor.uv);
-                            setupChart(lightLineChart, sensorDataList, "Fényerősség", ContextCompat.getColor(this, R.color.chart_light), sensor -> sensor.lightQuantity);
-                            setupChart(pressureLineChart, sensorDataList, "Légnyomás", ContextCompat.getColor(this, R.color.chart_pressure), sensor -> sensor.atmosphericPressure);
-                        } else {
-                            Toast.makeText(GraphActivity.this, "Nincsenek adatok a kiválasztott időszakban.", Toast.LENGTH_LONG).show();
-                            clearAllCharts();
-                        }
-                    });
+                        String lastMeasureTimeString = sensorDataList.get(sensorDataList.size() - 1).measureTime;
+
+
+                        SimpleDateFormat parser = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault());
+                        parser.setTimeZone(TimeZone.getTimeZone("UTC"));
+
+                        Date lastDate = parser.parse(lastMeasureTimeString);
+
+
+                        startTimeString = supabaseFormatter.format(lastDate);
+                    }
+
                 } else {
                     Log.e("Supabase", "Hiba a lekérés során: " + response.code() + " " + response.message());
                     runOnUiThread(() -> Toast.makeText(GraphActivity.this, "Hiba a lekérés során: " + response.message(), Toast.LENGTH_SHORT).show());
                 }
+                }while (jsonArray.length() ==1000);
+
+                runOnUiThread(() -> {
+                    if (!sensorDataList.isEmpty()) {
+                        Toast.makeText(GraphActivity.this, sensorDataList.size() + " adatpont betöltve.", Toast.LENGTH_SHORT).show();
+
+                        setupChart(tempLineChart, sensorDataList, "Hőmérséklet", ContextCompat.getColor(this, R.color.chart_temperature), sensor -> sensor.temperature);
+                        setupChart(humidityLineChart, sensorDataList, "Páratartalom", ContextCompat.getColor(this, R.color.chart_humidity), sensor -> sensor.humidity);
+                        setupChart(pm25LineChart, sensorDataList, "PM2.5", ContextCompat.getColor(this, R.color.chart_pm25), sensor -> sensor.PM2_5);
+                        setupChart(pm10LineChart, sensorDataList, "PM10", ContextCompat.getColor(this, R.color.chart_pm10), sensor -> sensor.PM10);
+                        setupChart(uvLineChart, sensorDataList, "UV Index", ContextCompat.getColor(this, R.color.chart_uv), sensor -> sensor.uv);
+                        setupChart(lightLineChart, sensorDataList, "Fényerősség", ContextCompat.getColor(this, R.color.chart_light), sensor -> sensor.lightQuantity);
+                        setupChart(pressureLineChart, sensorDataList, "Légnyomás", ContextCompat.getColor(this, R.color.chart_pressure), sensor -> sensor.atmosphericPressure);
+                    } else {
+                        Toast.makeText(GraphActivity.this, "Nincsenek adatok a kiválasztott időszakban.", Toast.LENGTH_LONG).show();
+                        clearAllCharts();
+                    }
+                });
             } catch (Exception e) {
                 Log.e("Supabase", "Hiba az adatok feldolgozása közben", e);
                 runOnUiThread(() -> Toast.makeText(GraphActivity.this, "Hiba: " + e.getMessage(), Toast.LENGTH_SHORT).show());
@@ -261,16 +276,16 @@ public class GraphActivity extends AppCompatActivity {
 
         LineDataSet dataSet = new LineDataSet(entries, label);
         dataSet.setColor(color);
-        dataSet.setLineWidth(2f); // Kicsit vastagabb vonal
+        dataSet.setLineWidth(2f);
         dataSet.setDrawCircles(false);
 
-        // VISSZAÁLLÍTVA: Nem akarjuk, hogy minden pont értéke látszódjon
+
         dataSet.setDrawValues(false);
 
-        // Kiemelés (a kurzor vonala) színének beállítása
+
         dataSet.setHighLightColor(color);
         dataSet.setHighlightLineWidth(1f);
-        dataSet.setDrawHorizontalHighlightIndicator(false); // Csak a függőleges vonalat hagyjuk meg
+        dataSet.setDrawHorizontalHighlightIndicator(false);
 
 
         LineData lineData = new LineData(dataSet);
@@ -286,7 +301,7 @@ public class GraphActivity extends AppCompatActivity {
         xAxis.setSpaceMin(0f);
         xAxis.setSpaceMax(0f);
         xAxis.setDrawGridLines(true);
-        xAxis.setGranularity(1f); // Megakadályozza, hogy a könyvtár "kitalált" címkéket hozzon létre
+        xAxis.setGranularity(1f);
         xAxis.setGranularityEnabled(true);
         xAxis.setDrawLabels(true);
 
@@ -298,7 +313,7 @@ public class GraphActivity extends AppCompatActivity {
 
             @Override
             public String getAxisLabel(float value, com.github.mikephil.charting.components.AxisBase axis) {
-                // Most már ez is UTC-ben fogja formázni a dátumot.
+
                 return sdf.format(new Date((long) value));
             }
         });
@@ -315,7 +330,7 @@ public class GraphActivity extends AppCompatActivity {
         Legend legend = chart.getLegend();
         legend.setEnabled(false);
 
-        chart.setExtraBottomOffset(50f);   // több hely alul, hogy kiférjenek
+        chart.setExtraBottomOffset(50f);
 
         // --- MARKER BEÁLLÍTÁSA ---
         MyMarkerView marker = new MyMarkerView(this, R.layout.custom_marker_view);
@@ -327,6 +342,6 @@ public class GraphActivity extends AppCompatActivity {
         chart.setPinchZoom(true);
         chart.setDoubleTapToZoomEnabled(true);
 
-        chart.invalidate(); // Diagram frissítése
+        chart.invalidate();
     }
 }

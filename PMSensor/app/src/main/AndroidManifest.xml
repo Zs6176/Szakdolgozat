@@ -2,11 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- ITT A HIÁNYZÓ ENGEDÉLY -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- A többi engedély, amiket korábban már hozzáadtunk -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Az internet eléréshez szükséges engedély (valószínűleg ez már benne van) -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" /> -->
 
     <application
         android:allowBackup="true"
@@ -16,7 +20,10 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.PMSensor">
+        android:theme="@style/Theme.PMSensor"
+        tools:targetApi="31">
+        <!-- A fő Activity -->
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -26,7 +33,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- A többi Activity, mint pl. a GraphActivity -->
         <activity android:name=".GraphActivity" />
+
     </application>
 
 </manifest>

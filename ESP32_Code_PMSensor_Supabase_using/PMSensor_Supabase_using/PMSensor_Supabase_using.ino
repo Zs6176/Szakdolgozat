@@ -1,7 +1,6 @@
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
-#include <Adafruit_AHTX0.h>
-#include <Adafruit_BMP280.h>
+#include <Adafruit_BME280.h>
 #include "Adafruit_LTR390.h"
 #include <SoftwareSerial.h>
 #include <esp_sds011.h>
@@ -38,8 +37,7 @@ SemaphoreHandle_t fileMutex;
 // Szenzor objektumok
 bool is_SDS_running = true;
 Adafruit_LTR390 ltr = Adafruit_LTR390();
-Adafruit_AHTX0 aht;
-Adafruit_BMP280 bmp;
+Adafruit_BME280 bme;
 
 // SDS011
 HardwareSerial& serialSDS(Serial2);
@@ -104,8 +102,7 @@ void setup() {
 setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1); 
 tzset();
   while (!ltr.begin()) { Serial.println("Couldn't find LTR390 sensor!"); delay(10); }
-  while (!aht.begin()) { Serial.println("AHT20 nem található!"); delay(10); }
-  while (!bmp.begin(0x77)) { Serial.println("BMP280 nem található!"); delay(10); }
+  while (!bme.begin(0x76)) { Serial.println("bme280 nem található!"); delay(10); }
 
   ltr.setResolution(LTR390_RESOLUTION_18BIT);
   pinMode(HEAT_PAD_PIN, OUTPUT);
@@ -183,15 +180,20 @@ void loop() {
   lux = (0.6 * als) / (gain * (100.0 / 100.0)) * wfac;
 
   // Szenzor olvasás
-  sensors_event_t humidity, temperature;
-  aht.getEvent(&humidity, &temperature);
-  temp_raw = temperature.temperature;
-  hum_raw = humidity.relative_humidity;
-  pres = bmp.readPressure() / 100.0F;
 
-  // Korrekciók
-  temp = 1.027622 * temp_raw - 0.00028865 * lux - 0.37998 * uv_index - 0.301226;
-  hum = 1.015463 * hum_raw + 0.000640061 * lux - 0.568064 * uv_index - 0.708233;
+  temp_raw = bme.readTemperature();
+  hum_raw = bme.readHumidity();
+  pres = bme.readPressure() / 100.0F;
+
+if (isSummerCorrectionActive()) {
+    temp = 1.027622 * temp_raw - 0.00028865 * lux - 0.37998 * uv_index - 0.301226;
+    hum  = 1.015463 * hum_raw + 0.000640061 * lux - 0.568064 * uv_index - 0.708233;
+    Serial.println("Nyári korrekció AKTÍV");
+} else {
+    temp = calculateCorrectedTemp(lux,temp_raw);
+    hum  = calculateCorrectedHum(lux,hum_raw,temp_raw);
+    Serial.println("Nyári korrekció INAKTÍV");
+}
 
   // SDS várakozás
   uint32_t timeout = millis() + 30000;
@@ -212,11 +214,10 @@ void loop() {
     delay(1000);
     int32_t remaining = deadline - millis();
     if (digitalRead(HEAT_PAD_PIN) == LOW) {
-      aht.getEvent(&humidity, &temperature);
-      if (humidity.relative_humidity >= 70 && remaining < 30000) {
+      if (hum >= 70 && remaining < 30000) {
         Serial.println("Heat pad ÁLLAPOT: BEKAPCSOLVA");
         digitalWrite(HEAT_PAD_PIN, HIGH);
-      } else if (humidity.relative_humidity >= 60 && remaining < 20000) {
+      } else if (hum >= 60 && remaining < 20000) {
         Serial.println("Heat pad ÁLLAPOT: BEKAPCSOLVA");
         digitalWrite(HEAT_PAD_PIN, HIGH);
       }
@@ -225,7 +226,56 @@ void loop() {
   }
   sds011.perform_work();
 }
+bool isSummerCorrectionActive() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    // Ha nincs NTP, akkor NE legyen korrekció
+    return false;
+  }
 
+  int month = timeinfo.tm_mon + 1;  // 0–11 → 1–12
+
+  // Nyár + 1 hónap előtte/utána: május 1 – szeptember 30.
+  if (month >= 5 && month <= 9) return true;           // június, július, augusztus
+
+
+  return false;
+}
+// Hőmérséklet számítása
+// Képlet: =HA(C>20, -2.09 + 0.461*D - 0.00009*C, -2.21 + 1.07*D + 0.127*C)
+float calculateCorrectedTemp(float light_lux, float raw_temp) {
+  float corrected_temp;
+
+  if (light_lux > 20) {
+    // Világosban (> 20 lux)
+    corrected_temp = -2.09 + (0.461 * raw_temp) - (0.00009 * light_lux);
+  } else {
+    // Sötétben (<= 20 lux)
+    corrected_temp = -2.21 + (1.07 * raw_temp) + (0.127 * light_lux);
+  }
+  
+  return corrected_temp;
+}
+
+// Páratartalom számítása
+// Képlet: =HA(C>20, 18.48 + 0.948*B + 1.2*D + 0.00036*C, 7.04 + 1.1*B + 0.058*D - 0.383*C)
+float calculateCorrectedHum(float light_lux, float raw_hum, float raw_temp) {
+  float corrected_hum;
+
+  if (light_lux > 20) {
+    // Világosban (> 20 lux)
+    corrected_hum = 18.48 + (0.948 * raw_hum) + (1.2 * raw_temp) + (0.00036 * light_lux);
+  } else {
+    // Sötétben (<= 20 lux)
+    corrected_hum = 7.04 + (1.1 * raw_hum) + (0.058 * raw_temp) - (0.383 * light_lux);
+  }
+
+  // Opcionális: Határok kezelése (hogy ne legyen 100% felett vagy 0% alatt)
+  if (corrected_hum > 100.0) corrected_hum = 100.0;
+  if (corrected_hum < 0.0) corrected_hum = 0.0;
+
+  return corrected_hum;
+}
 // --- WiFi ---
 void ensureWiFiConnected() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -315,8 +365,7 @@ void refreshSupabaseToken() {
 
 bool checkAndRecoverI2C() {
   byte addressesToScan[] = {
-    0x77, // BMP280
-    0x38, // AHTX0
+    0x76, // bme
     0x53  // LTR390
   };
   bool recovery_needed = false;
@@ -345,12 +394,8 @@ bool checkAndRecoverI2C() {
     // B: Minden I2C szenzor könyvtárának újraindítása
     // (mintha a setup() futna le újra)
     Serial.println("Szenzorok szoftveres újraindítása...");
-    
-    if (!aht.begin()) { 
-      Serial.println("AHT20 újraindítása sikertelen!"); 
-    }
-    if (!bmp.begin(0x77)) { 
-      Serial.println("BMP280 újraindítása sikertelen!"); 
+
+    if (!bme.begin(0x76)) {Serial.println("bme280 újraindítása sikertelen!"); 
     }
     if (!ltr.begin()) { 
       Serial.println("LTR390 újraindítása sikertelen!"); 
@@ -556,7 +601,7 @@ void uploadToSupabase(float pres, float hum, float hum_raw, float lux, float wpm
       }
     }
 
-ú    if (time_synced && last_valid_time > 0) {
+    if (time_synced && last_valid_time > 0) {
       Serial.println("Hálózati hiba. Offline mentés folyamatban...");
       
       if (!is_fresh_ntp) {
